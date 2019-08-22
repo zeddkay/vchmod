@@ -1,0 +1,329 @@
+#!/bin/bash
+
+print_details() {
+        filename=${arr[currentLine-1]}
+        if [[ "$isDirectory" == "0" && "$currentLine" == "$lines" ]]
+        then
+                filename=$last
+                links=$(ls -l $filename | cut -f2 -d' ')
+                user=$(ls -l $filename | cut -f3 -d' ')
+                group=$(ls -l $filename | cut -f4 -d' ')
+                size=$(ls -l $filename | cut -f5 -d' ')
+                modified=$(ls -l $filename | cut -f6-7 -d' ')
+                year=$(ls --full-time $filename | cut -f6 -d' ' | cut -f1 -d'-')
+        else
+                links=$(ls -ld $filename | cut -f2 -d' ')
+                user=$(ls -ld $filename | cut -f3 -d' ')
+                group=$(ls -ld $filename | cut -f4 -d' ')
+                size=$(ls -ld $filename | cut -f5 -d' ')
+                modified=$(ls -ld $filename | cut -f6-7 -d' ')
+                year=$(ls -ld --full-time $filename | cut -f6 -d' ' | cut -f1 -d'-' | head -4 | tail -1)
+        fi
+        echo -e "\r\e    Links: $links  Owner: $user  Group: $group  Size: $size  Modified: $modified $year"
+}
+
+change_cursor_row() {
+        tput civis
+        tput rmso
+               
+        tput cup $previousDetails
+        echo -e "\r\e[0K " >&2
+        tput cup $newDetails
+        print_details
+       
+        previousDetails=$((newDetails))
+        tput cup $u $currentColNum
+       
+        tput cnorm
+}
+
+echo_permission() {
+        if [ $? = 0 ]
+        then
+                echo $permission
+        fi
+}
+
+if [ $# -eq 0 ]
+then
+        set $(pwd)
+fi
+
+if [ $# -gt 1 ]
+then
+        printf "Usage: showpath [ filename ]\n" >&2
+        exit 1
+elif [ ! -d "$1" -a ! -f "$1" ]
+then
+        echo "$1 is not a valid filename" >&2
+        exit 1
+fi
+tput clear
+lines=0
+filename=""
+
+if [ "$1" != ""  ]
+then
+        filetype=$(ls -ld $1 | sed 's/./&\n/g' | head -1)
+        if [ "$filetype" == "d" ]
+        then
+                cd $1
+        else
+                filename=$(echo $1 | sed 's/.*\///g')
+                if [[ $1 == *\/* ]]
+                then
+                        cd $(echo $1 | sed 's/\/[^\/]*$//')
+                else
+                        cd .
+                fi
+        fi
+fi
+
+path=$(pwd)
+command=""
+u=0
+isDirectory="0"
+screenWidth=$(tput cols)
+printf "  Owner   Group   Other   Filename\n"
+printf "  -----   -----   -----   --------\n"
+printf "\n"
+echo "$(ls -ld / | cut -f1 -d' ' | sed 's/.$//' | sed 's/......./& /' | sed 's/..../& /' | sed 's/./& /g')" " /" 2> /dev/null
+first="/"
+declare -a arr
+arr=$first
+lines=$((lines+1))
+printf "\n"
+curPath="/"
+declare -a args
+args=$(echo $path | sed 's/.//' | tr '/' ' ')
+
+for i in $(echo $path |  sed 's/.//' | tr '/' ' ')
+do
+        echo "$(ls -ld $curPath$i | cut -f1 -d' ' | sed 's/......./& /' | sed 's/..../& /' | sed 's/./& /g')" " $i" | cut -c1-$screenWidth
+        printf "\n"
+        i=$i"/"
+        curPath=$curPath$i
+        lines=$((lines+1))
+        arr+=($curPath)
+done
+
+if [[ "$filename" != "" && "$filetype" != "d" ]]
+then
+        echo "$(ls -l $filename | cut -f1 -d' ' | sed 's/......./& /' | sed 's/..../& /' | sed 's/./& /g')" " $filename" | cut -c1-$screenWidth
+        last=$curPath$filename
+        arr+=($last)
+        lines=$((lines+1))
+        links=$(ls -l $filename | cut -f2 -d' ')
+        user=$(ls -l $filename | cut -f3 -d' ')
+        group=$(ls -l $filename | cut -f4 -d' ')
+        size=$(ls -l $filename | cut -f5 -d' ')
+        modified=$(ls -l $filename | cut -f6-7 -d' ')
+        year=$(ls --full-time $filename | cut -f6 -d' ' | cut -f1 -d'-')
+else
+        isDirectory="1"
+        links=$(ls -ld $filename | cut -f2 -d' ')
+        user=$(ls -ld $filename | cut -f3 -d' ')
+        group=$(ls -ld $filename | cut -f4 -d' ')
+        size=$(ls -ld $filename | cut -f5 -d' ')
+        modified=$(ls -ld $filename | cut -f6-7 -d' ')
+        year=$(ls --full-time $filename | cut -f6 -d' ' | cut -f1 -d'-' | head -4 | tail -1)
+fi     
+       
+lowestLevel=$(( (lines * 2) + 1))
+previousDetails=$(( lowestLevel + 1))
+newDetails=$(( lowestLevel + 1))
+bottom=$(( lowestLevel ))
+top=$(( 4 ))
+u=$(( lowestLevel ))
+  
+currentLine=$(( lines ))
+previousLine=$((currentLine))
+       
+stty -icanon min 0 time 0 -icrnl -echo
+tput smkx
+
+if [ "$isDirectory" == "1" ]
+then
+        # to print at proper line because last dir prints a newline and we don't want that here
+        x=$((u+1))
+        tput cup $x 26
+        echo -e "\r\e    Links: $links  Owner: $user  Group: $group  Size: $size  Modified: $modified $year"
+else    
+        echo "  Links: $links  Owner: $user  Group: $group  Size: $size  Modified: $modified $year"
+fi
+       
+rows=$(tput lines)
+pos=$((rows-4))
+tput cup $pos 0
+       
+printf "Valid keys: k (up), j (down): move between filenames\n"
+printf "%11s h (left), l (right): move between permissions\n"
+printf "%11s r, w, x, -: change permissions;   q: quit"
+
+currentColNum=26
+tput cup $u $currentColNum
+while true     
+do
+        read command
+
+        trap "tput cup $rows 0; stty icanon icrnl echo; exit 0;" SIGINT SIGTERM
+        case $command in
+                k)
+                        if [ $u -gt $top ]
+                        then
+                                u=$((u-2))
+                                currentLine=$((currentLine-1))
+                                newDetails=$((newDetails-2))
+                                change_cursor_row
+                        fi ;;
+                j)
+                        if [ $u -lt $bottom ]
+                        then
+                                u=$((u+2))
+                                currentLine=$((currentLine+1))
+                                newDetails=$((newDetails+2))
+                                change_cursor_row
+                        fi ;;
+                h)
+                        if [ $currentColNum -gt 2 ]
+                        then
+                                case $currentColNum in
+                                        26)
+                                                currentColNum=22
+                                                ;;
+                                        18)
+                                                currentColNum=14
+                                                ;;
+                                        10)
+                                                currentColNum=6
+                                                ;;
+                                        *)
+                                                currentColNum=$((currentColNum-2))
+                                                ;;
+                                esac
+                        fi
+                        tput cup $u $currentColNum
+                        ;;     
+                l)
+                        if [ $currentColNum -lt 26 ]
+                        then
+                                case $currentColNum in
+                                        6)
+                                                currentColNum=10
+                                                ;;
+                                        14)
+                                                currentColNum=18
+                                                ;;
+                                        22)
+                                                currentColNum=26
+                                                ;;
+                                        *)
+                                                currentColNum=$((currentColNum+2))
+                                                ;;
+                                esac
+                        fi
+                        tput cup $u $currentColNum
+                        ;;
+                r)
+                        permission="r"
+                        case $currentColNum in
+                                18)
+                                        chmod o+r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                10)
+                                        chmod g+r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                2)
+                                        chmod u+r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                        esac
+                        tput cup $u $currentColNum
+                        ;;
+                w)
+                        permission="w"
+                        case $currentColNum in
+                                20)
+                                        chmod o+w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                12)
+                                        chmod g+w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                4)
+                                        chmod u+w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                        esac
+                        tput cup $u $currentColNum
+                        ;;
+                x)
+                        permission="x"
+                        case $currentColNum in
+                                22)
+                                        chmod o+x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                14)
+                                        chmod g+x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                6)
+                                        chmod u+x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                        esac
+                        tput cup $u $currentColNum
+                        ;;
+                -)
+                        permission="-"
+                        case $currentColNum in
+                                22)
+                                        chmod o-x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                20)
+                                        chmod o-w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                18)
+                                        chmod o-r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                14)
+                                        chmod g-x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                12)
+                                        chmod g-w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                10)
+                                        chmod g-r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                6)
+                                        chmod u-x ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                4)
+                                        chmod u-w ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                                2)
+                                        chmod u-r ${arr[currentLine-1]} 2> /dev/null
+                                        echo_permission
+                                        ;;
+                        esac
+                        tput cup $u $currentColNum
+                        ;;
+                q)
+                        stty icanon icrnl echo
+                        exit=$((pos+4))
+                        tput cup $exit 0
+                        exit 0 ;;
+        esac
+done
